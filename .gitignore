@@ -33,6 +33,7 @@ go.work
 *.md
 !README.md
 !DEVELOPMENT.md
+!SECURITY.md
 
 # Python
 __pycache__/
