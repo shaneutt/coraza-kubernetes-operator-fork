@@ -1,16 +1,19 @@
 # Coraza Kubernetes Operator
 
-Automated deployment and life-cycle management of [Coraza] on [Kubernetes].
+[Web Application Firewall (WAF)] support for [Kubernetes] [Gateways].
 
-[Coraza]:https://github.com/corazawaf
+[Web Application Firewall (WAF)]:https://www.cloudflare.com/learning/ddos/glossary/web-application-firewall-waf/
 [Kubernetes]:https://github.com/kubernetes
+[Gateways]:https://gateway-api.sigs.k8s.io/api-types/gateway/
 
 ## About
 
-The Coraza Kubernetes Operator (CKO) enables declarative management of Coraza
-Web Application Firewall (WAF) policies in Kubernetes. It integrates the Coraza
-WAF engine with gateway/proxy solutions to enforce rules for Kubernetes cluster
-traffic.
+The Coraza Kubernetes Operator (CKO) enables declarative management of Web
+Application Firewalls (WAF) `Engines` and `RuleSets` in Kubernetes. These
+`Engines` are built on [CorazaWAF]. The CKO supports attachment of `Engines`
+to `Gateways` and enforcement of rules via `RuleSets`.
+
+[CorazaWAF]:https://github.com/corazawaf/coraza
 
 **Key Features:**
 
