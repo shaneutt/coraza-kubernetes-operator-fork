@@ -33,7 +33,7 @@ their gateways/proxies:
 - `istio` - Istio integration ✅ **Currently Supported (ingress Gateway only)**
 - `wasm` - WebAssembly deployment ✅ **Currently Supported**
 
-> **Note**: Only Istio+Wasm is supported for now.
+> **Note**: Only Istio+Wasm is supported currently.
 
 ### Architecture
 
@@ -64,7 +64,7 @@ Documentation is available in the [wiki].
 
 See the [Installation Documentation] for installation options.
 
-Once it's up and running, see the [Basic Usage Documentation].
+Once everything's up and running, see the [Basic Usage Documentation].
 
 [Installation Documentation]:https://github.com/networking-incubator/coraza-kubernetes-operator/wiki/Installation
 [Basic Usage Documentation]:https://github.com/networking-incubator/coraza-kubernetes-operator/wiki/Basic-Usage

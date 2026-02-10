@@ -31,7 +31,7 @@ what you're looking for so we can do some assessment together first.
 
 ## How to contribute patches
 
-See also: [DEVELOPMENT.md](DEVELOPMENT.md)
+See: [DEVELOPMENT.md](DEVELOPMENT.md)
 
 1. Fork the repository
 2. Create a new branch (e.g. `git checkout -b feature/my-change`)
@@ -41,4 +41,4 @@ See also: [DEVELOPMENT.md](DEVELOPMENT.md)
 6. Open a pull request
 
 > **Note**: For early feedback, or if your PR is incomplete, feel free to open
-> it as a `draft` to indicate the need for time/help.
+> it as a `draft` to indicate the need for early review and feedback.
