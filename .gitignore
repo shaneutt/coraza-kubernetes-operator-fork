@@ -32,6 +32,7 @@ go.work
 *.txt
 *.md
 !README.md
+!CONTRIBUTING.md
 !DEVELOPMENT.md
 !SECURITY.md
 !CHANGELOG.md
