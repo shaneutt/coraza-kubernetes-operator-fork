@@ -5,6 +5,13 @@ Kubernetes Operator (CKO).
 
 > **Note**: All releases target tags, and our tags follow [semver].
 
+> **Note**: Most of the release process is automated via [GitHub Workflow]. See
+> the [release.yml] workflow for details.
+
+[semver]:https://github.com/semver/semver
+[GitHub Workflow]:https://docs.github.com/en/actions/concepts/workflows-and-actions/workflows
+[release.yml]:https://github.com/networking-incubator/coraza-kubernetes-operator/blob/main/.github/workflows/release.yml
+
 ## Process
 
 ### Step 1 - Communication
@@ -39,8 +46,6 @@ This will trigger workflows to test and create the release.
 > or `beta` (e.g. `v0.1.1`, `v1.0.0-rc1`, `v0.1.0-alpha1`) will be
 > automatically marked as _pre-releases_.
 
-[semver]:https://github.com/semver/semver
-
 ### Step 3 - Test & Release Workflows
 
 After pushing the tag a `build-test` workflow will run which you can follow on
@@ -65,6 +70,8 @@ following are correct:
 * The release **description** should include the correct changelog
 * The **crds.yaml**, **operator.yaml** & **samples.yaml** artifacts are attached
   * Check each manifest, and verify its correct-ness
+* Make sure the **previous release** is set correctly
+  * e.g. for a `v1.0.0` release, _don't_ target `rc` or other pre-releases
 
 Once you've verified the release integrity, remove the draft status and publish
 it.

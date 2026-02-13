@@ -36,7 +36,6 @@ dist/*
 !CONTRIBUTING.md
 !DEVELOPMENT.md
 !SECURITY.md
-!CHANGELOG.md
 !RELEASE.md
 
 # Python
