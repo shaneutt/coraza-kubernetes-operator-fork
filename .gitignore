@@ -37,6 +37,7 @@ dist/*
 !DEVELOPMENT.md
 !SECURITY.md
 !CHANGELOG.md
+!RELEASE.md
 
 # Python
 __pycache__/
