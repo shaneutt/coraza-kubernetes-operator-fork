@@ -1,4 +1,5 @@
 ![CI](https://github.com/networking-incubator/coraza-kubernetes-operator/actions/workflows/ci.yml/badge.svg)
+![RELEASE](https://img.shields.io/github/v/release/networking-incubator/coraza-kubernetes-operator?include_prereleases)
 # Coraza Kubernetes Operator
 
 [Web Application Firewall (WAF)] support for [Kubernetes] [Gateways].
