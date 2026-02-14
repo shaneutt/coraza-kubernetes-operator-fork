@@ -28,14 +28,22 @@ go.work
 *.swo
 *~
 
-# notes
+# local notes
 *.txt
 *.md
+
+# documentation
 !README.md
 !CONTRIBUTING.md
 !DEVELOPMENT.md
 !SECURITY.md
 !CHANGELOG.md
+
+# templates
+!.github/*.md
+!.github/**/*.md
+
+# Copilot
 !.github/copilot-instructions.md
 !.github/instructions/*.instructions.md
 
