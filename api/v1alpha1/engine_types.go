@@ -148,6 +148,7 @@ type EngineStatus struct {
 	// - "Ready": the engine has been successfully deployed and is operational
 	// - "Progressing": the resource is being created or updated
 	// - "Degraded": the resource failed to reach or maintain its desired state
+	// - "TargetReady": the target Gateway exists and no conflicts detected
 	//
 	// The status of each condition is one of True, False, or Unknown.
 	//

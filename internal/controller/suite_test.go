@@ -30,6 +30,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -90,11 +91,23 @@ func TestMain(m *testing.M) {
 	// If the envvar is not passed, the latest GA will be used
 	k8sVersion := os.Getenv("K8S_VERSION")
 
+	gatewayAPICRDDir, err := downloadGatewayAPICRDs()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to download Gateway API CRDs: %v\n", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if rmErr := os.RemoveAll(gatewayAPICRDDir); rmErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to cleanup Gateway API CRD dir: %v\n", rmErr)
+		}
+	}()
+
 	testEnv = &envtest.Environment{
 		CRDInstallOptions: envtest.CRDInstallOptions{
 			Paths: []string{
 				filepath.Join("..", "..", "config", "crd", "bases"),
 				istioCRDDir,
+				gatewayAPICRDDir,
 			},
 			CleanUpAfterUse: true,
 		},
@@ -159,6 +172,82 @@ func setupTest(t *testing.T) (context.Context, func()) {
 	}
 
 	return ctx, cleanup
+}
+
+// createTestGateway creates an unstructured Gateway resource in envtest for
+// tests that need a resolvable target.
+func createTestGateway(t *testing.T, name, namespace string) {
+	t.Helper()
+	gw := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "gateway.networking.k8s.io/v1",
+			"kind":       "Gateway",
+			"metadata": map[string]any{
+				"name":      name,
+				"namespace": namespace,
+			},
+			"spec": map[string]any{
+				"gatewayClassName": "istio",
+				"listeners": []any{
+					map[string]any{
+						"name":     "http",
+						"port":     int64(80),
+						"protocol": "HTTP",
+					},
+				},
+			},
+		},
+	}
+	if err := k8sClient.Create(context.Background(), gw); err != nil {
+		t.Fatalf("Failed to create test Gateway %s/%s: %v", namespace, name, err)
+	}
+	t.Cleanup(func() {
+		_ = k8sClient.Delete(context.Background(), gw)
+	})
+}
+
+const gatewayAPIVersion = "v1.2.1"
+
+func downloadGatewayAPICRDs() (string, error) {
+	tmpDir, err := os.MkdirTemp("", "gateway-api-crds-*")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp dir: %w", err)
+	}
+
+	crdURL := fmt.Sprintf(
+		"https://github.com/kubernetes-sigs/gateway-api/releases/download/%s/standard-install.yaml",
+		gatewayAPIVersion,
+	)
+	resp, err := http.Get(crdURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to download Gateway API CRDs: %w", err)
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to close response body: %v\n", closeErr)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to download Gateway API CRDs: HTTP %d", resp.StatusCode)
+	}
+
+	crdFile := filepath.Join(tmpDir, "gateway-api-crds.yaml")
+	f, err := os.Create(crdFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to create CRD file: %w", err)
+	}
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to close file: %v\n", closeErr)
+		}
+	}()
+
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		return "", fmt.Errorf("failed to write CRD file: %w", err)
+	}
+
+	return tmpDir, nil
 }
 
 func downloadIstioCRDs() (string, error) {

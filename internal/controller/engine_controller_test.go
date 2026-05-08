@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -186,6 +187,8 @@ func TestEngineReconciler_ReconcileIstioDriver(t *testing.T) {
 	ctx := context.Background()
 	ns := utils.NewTestEngine(utils.EngineOptions{}).Namespace
 
+	createTestGateway(t, "test-gw", ns)
+
 	ruleset := utils.NewTestRuleSet(utils.RuleSetOptions{
 		Name:      "test-ruleset",
 		Namespace: ns,
@@ -246,11 +249,14 @@ func TestEngineReconciler_ReconcileIstioDriver(t *testing.T) {
 		Namespace: engine.Namespace,
 	}, &updated)
 	require.NoError(t, err)
-	assert.Len(t, updated.Status.Conditions, 1)
-	condition := updated.Status.Conditions[0]
-	assert.Equal(t, "Ready", condition.Type)
-	assert.Equal(t, metav1.ConditionTrue, condition.Status)
-	assert.Equal(t, "Configured", condition.Reason)
+	readyCond := apimeta.FindStatusCondition(updated.Status.Conditions, "Ready")
+	require.NotNil(t, readyCond)
+	assert.Equal(t, metav1.ConditionTrue, readyCond.Status)
+	assert.Equal(t, "Configured", readyCond.Reason)
+
+	targetCond := apimeta.FindStatusCondition(updated.Status.Conditions, "TargetReady")
+	require.NotNil(t, targetCond, "Engine should have TargetReady condition")
+	assert.Equal(t, metav1.ConditionTrue, targetCond.Status)
 
 	assert.True(t, recorder.HasEvent("Normal", "WasmPluginCreated"),
 		"expected Normal/WasmPluginCreated event; got: %v", recorder.Events)
@@ -314,6 +320,8 @@ func TestEngineReconciler_StatusUpdateHandling(t *testing.T) {
 
 func TestEngineReconciler_FailurePolicyInWasmPluginConfig(t *testing.T) {
 	ctx := context.Background()
+
+	createTestGateway(t, "test-gw", testNamespace)
 
 	ruleset := utils.NewTestRuleSet(utils.RuleSetOptions{
 		Name:      "test-ruleset",
@@ -492,6 +500,8 @@ func TestEngineReconciler_ImagePullSecretInWasmPlugin(t *testing.T) {
 
 func TestEngineReconciler_ImagePullSecretEnvtest(t *testing.T) {
 	ctx := context.Background()
+
+	createTestGateway(t, "test-gw", testNamespace)
 
 	t.Log("Creating RuleSet for imagePullSecret envtest")
 	ruleset := utils.NewTestRuleSet(utils.RuleSetOptions{
@@ -1089,6 +1099,8 @@ func TestEngineReconciler_BuildWasmPlugin_WasmImageResolution(t *testing.T) {
 func TestEngineReconciler_TokenStoreIntegration(t *testing.T) {
 	ctx := context.Background()
 
+	createTestGateway(t, "test-gw", testNamespace)
+
 	ruleset := utils.NewTestRuleSet(utils.RuleSetOptions{
 		Name:      "tokenstore-ruleset",
 		Namespace: testNamespace,
@@ -1241,6 +1253,8 @@ func TestEngineReconciler_TokenStoreIntegration(t *testing.T) {
 func TestEngineReconciler_NetworkPolicyCreated(t *testing.T) {
 	ctx := context.Background()
 
+	createTestGateway(t, "test-gw", testNamespace)
+
 	t.Log("Creating RuleSet for NetworkPolicy test")
 	ruleset := utils.NewTestRuleSet(utils.RuleSetOptions{
 		Name:      "netpol-test-ruleset",
@@ -1356,4 +1370,242 @@ func TestEngineReconciler_NetworkPolicyCreated(t *testing.T) {
 	)
 	require.NoError(t, err)
 	assert.Empty(t, npList.Items, "NetworkPolicy should be deleted after finalizer runs")
+}
+
+func TestEngineReconciler_TargetNotFound(t *testing.T) {
+	ctx := context.Background()
+
+	ruleset := utils.NewTestRuleSet(utils.RuleSetOptions{
+		Name:      "target-nf-ruleset",
+		Namespace: testNamespace,
+	})
+	require.NoError(t, k8sClient.Create(ctx, ruleset))
+	t.Cleanup(func() {
+		_ = k8sClient.Delete(ctx, ruleset)
+	})
+
+	engine := utils.NewTestEngine(utils.EngineOptions{
+		Name:        "target-nf-engine",
+		Namespace:   testNamespace,
+		RuleSetName: ruleset.Name,
+		GatewayName: "nonexistent-gw",
+	})
+	require.NoError(t, k8sClient.Create(ctx, engine))
+	t.Cleanup(func() {
+		_ = k8sClient.Delete(ctx, engine)
+	})
+
+	recorder := utils.NewFakeRecorder()
+	reconciler := &EngineReconciler{
+		Client:                    k8sClient,
+		Scheme:                    scheme,
+		Recorder:                  recorder,
+		ruleSetCacheServerCluster: "test-cluster",
+		defaultWasmImage:          defaults.DefaultCorazaWasmOCIReference,
+		operatorNamespace:         testNamespace,
+	}
+	req := ctrl.Request{
+		NamespacedName: types.NamespacedName{
+			Name:      engine.Name,
+			Namespace: engine.Namespace,
+		},
+	}
+
+	result, err := reconciler.Reconcile(ctx, req)
+	require.NoError(t, err)
+	assert.NotZero(t, result.RequeueAfter, "first reconcile should requeue after adding finalizer")
+
+	result, err = reconciler.Reconcile(ctx, req)
+	require.NoError(t, err)
+	assert.Zero(t, result.RequeueAfter)
+
+	var updated wafv1alpha1.Engine
+	require.NoError(t, k8sClient.Get(ctx, req.NamespacedName, &updated))
+	require.NotNil(t, updated.Status)
+
+	targetCond := apimeta.FindStatusCondition(updated.Status.Conditions, "TargetReady")
+	require.NotNil(t, targetCond, "Engine should have TargetReady condition")
+	assert.Equal(t, metav1.ConditionFalse, targetCond.Status)
+	assert.Equal(t, "TargetNotFound", targetCond.Reason)
+
+	degradedCond := apimeta.FindStatusCondition(updated.Status.Conditions, "Degraded")
+	require.NotNil(t, degradedCond, "Engine should have Degraded condition")
+	assert.Equal(t, metav1.ConditionTrue, degradedCond.Status)
+
+	assert.True(t, recorder.HasEvent("Warning", "TargetNotFound"),
+		"expected Warning/TargetNotFound event; got: %v", recorder.Events)
+
+	wasmPlugin := &unstructured.Unstructured{}
+	wasmPlugin.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "extensions.istio.io",
+		Version: "v1alpha1",
+		Kind:    "WasmPlugin",
+	})
+	err = k8sClient.Get(ctx, types.NamespacedName{
+		Name:      fmt.Sprintf("%s%s", WasmPluginNamePrefix, engine.Name),
+		Namespace: engine.Namespace,
+	}, wasmPlugin)
+	assert.True(t, apierrors.IsNotFound(err), "WasmPlugin should not be created when target is not found")
+}
+
+func TestEngineReconciler_TargetFound(t *testing.T) {
+	ctx := context.Background()
+
+	ruleset := utils.NewTestRuleSet(utils.RuleSetOptions{
+		Name:      "target-found-ruleset",
+		Namespace: testNamespace,
+	})
+	require.NoError(t, k8sClient.Create(ctx, ruleset))
+	t.Cleanup(func() {
+		_ = k8sClient.Delete(ctx, ruleset)
+	})
+
+	createTestGateway(t, "target-found-gw", testNamespace)
+
+	engine := utils.NewTestEngine(utils.EngineOptions{
+		Name:        "target-found-engine",
+		Namespace:   testNamespace,
+		RuleSetName: ruleset.Name,
+		GatewayName: "target-found-gw",
+	})
+	require.NoError(t, k8sClient.Create(ctx, engine))
+	t.Cleanup(func() {
+		_ = k8sClient.Delete(ctx, engine)
+	})
+
+	reconciler := &EngineReconciler{
+		Client:                    k8sClient,
+		Scheme:                    scheme,
+		Recorder:                  utils.NewTestRecorder(),
+		kubeClient:                testKubeClient,
+		ruleSetCacheServerCluster: "test-cluster",
+		defaultWasmImage:          defaults.DefaultCorazaWasmOCIReference,
+		operatorNamespace:         testNamespace,
+	}
+	req := ctrl.Request{
+		NamespacedName: types.NamespacedName{
+			Name:      engine.Name,
+			Namespace: engine.Namespace,
+		},
+	}
+
+	result, err := reconciler.Reconcile(ctx, req)
+	require.NoError(t, err)
+	assert.NotZero(t, result.RequeueAfter, "first reconcile should requeue after adding finalizer")
+
+	result, err = reconciler.Reconcile(ctx, req)
+	require.NoError(t, err)
+	assert.NotZero(t, result.RequeueAfter, "should schedule token renewal requeue")
+
+	var updated wafv1alpha1.Engine
+	require.NoError(t, k8sClient.Get(ctx, req.NamespacedName, &updated))
+	require.NotNil(t, updated.Status)
+
+	targetCond := apimeta.FindStatusCondition(updated.Status.Conditions, "TargetReady")
+	require.NotNil(t, targetCond, "Engine should have TargetReady condition")
+	assert.Equal(t, metav1.ConditionTrue, targetCond.Status)
+	assert.Equal(t, "TargetFound", targetCond.Reason)
+
+	readyCond := apimeta.FindStatusCondition(updated.Status.Conditions, "Ready")
+	require.NotNil(t, readyCond)
+	assert.Equal(t, metav1.ConditionTrue, readyCond.Status)
+}
+
+func TestEngineReconciler_TargetConflicting(t *testing.T) {
+	ctx := context.Background()
+
+	ruleset := utils.NewTestRuleSet(utils.RuleSetOptions{
+		Name:      "conflict-ruleset",
+		Namespace: testNamespace,
+	})
+	require.NoError(t, k8sClient.Create(ctx, ruleset))
+	t.Cleanup(func() {
+		_ = k8sClient.Delete(ctx, ruleset)
+	})
+
+	createTestGateway(t, "conflict-gw", testNamespace)
+
+	olderEngine := utils.NewTestEngine(utils.EngineOptions{
+		Name:        "conflict-engine-a",
+		Namespace:   testNamespace,
+		RuleSetName: ruleset.Name,
+		GatewayName: "conflict-gw",
+	})
+	require.NoError(t, k8sClient.Create(ctx, olderEngine))
+	t.Cleanup(func() {
+		_ = k8sClient.Delete(ctx, olderEngine)
+	})
+
+	newerEngine := utils.NewTestEngine(utils.EngineOptions{
+		Name:        "conflict-engine-b",
+		Namespace:   testNamespace,
+		RuleSetName: ruleset.Name,
+		GatewayName: "conflict-gw",
+	})
+	require.NoError(t, k8sClient.Create(ctx, newerEngine))
+	t.Cleanup(func() {
+		_ = k8sClient.Delete(ctx, newerEngine)
+	})
+
+	reconciler := &EngineReconciler{
+		Client:                    k8sClient,
+		Scheme:                    scheme,
+		Recorder:                  utils.NewFakeRecorder(),
+		kubeClient:                testKubeClient,
+		ruleSetCacheServerCluster: "test-cluster",
+		defaultWasmImage:          defaults.DefaultCorazaWasmOCIReference,
+		operatorNamespace:         testNamespace,
+	}
+
+	olderReq := ctrl.Request{
+		NamespacedName: types.NamespacedName{
+			Name:      olderEngine.Name,
+			Namespace: olderEngine.Namespace,
+		},
+	}
+	result, err := reconciler.Reconcile(ctx, olderReq)
+	require.NoError(t, err)
+	assert.NotZero(t, result.RequeueAfter)
+	result, err = reconciler.Reconcile(ctx, olderReq)
+	require.NoError(t, err)
+	assert.NotZero(t, result.RequeueAfter, "older engine should schedule token renewal")
+
+	var olderUpdated wafv1alpha1.Engine
+	require.NoError(t, k8sClient.Get(ctx, olderReq.NamespacedName, &olderUpdated))
+	require.NotNil(t, olderUpdated.Status)
+
+	olderReady := apimeta.FindStatusCondition(olderUpdated.Status.Conditions, "Ready")
+	require.NotNil(t, olderReady)
+	assert.Equal(t, metav1.ConditionTrue, olderReady.Status, "older engine should be Ready")
+
+	newerRecorder := utils.NewFakeRecorder()
+	reconciler.Recorder = newerRecorder
+	newerReq := ctrl.Request{
+		NamespacedName: types.NamespacedName{
+			Name:      newerEngine.Name,
+			Namespace: newerEngine.Namespace,
+		},
+	}
+	result, err = reconciler.Reconcile(ctx, newerReq)
+	require.NoError(t, err)
+	assert.NotZero(t, result.RequeueAfter)
+	result, err = reconciler.Reconcile(ctx, newerReq)
+	require.NoError(t, err)
+	assert.Zero(t, result.RequeueAfter)
+
+	var newerUpdated wafv1alpha1.Engine
+	require.NoError(t, k8sClient.Get(ctx, newerReq.NamespacedName, &newerUpdated))
+	require.NotNil(t, newerUpdated.Status)
+
+	targetCond := apimeta.FindStatusCondition(newerUpdated.Status.Conditions, "TargetReady")
+	require.NotNil(t, targetCond, "newer engine should have TargetReady condition")
+	assert.Equal(t, metav1.ConditionFalse, targetCond.Status)
+	assert.Equal(t, "TargetConflicting", targetCond.Reason)
+
+	degradedCond := apimeta.FindStatusCondition(newerUpdated.Status.Conditions, "Degraded")
+	require.NotNil(t, degradedCond, "newer engine should be Degraded")
+	assert.Equal(t, metav1.ConditionTrue, degradedCond.Status)
+
+	assert.True(t, newerRecorder.HasEvent("Warning", "TargetConflicting"),
+		"expected Warning/TargetConflicting event; got: %v", newerRecorder.Events)
 }

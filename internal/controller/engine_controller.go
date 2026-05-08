@@ -39,6 +39,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -55,7 +56,7 @@ import (
 // +kubebuilder:rbac:groups=waf.k8s.coraza.io,resources=engines/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=waf.k8s.coraza.io,resources=rulesets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=waf.k8s.coraza.io,resources=rulesets/status,verbs=get
-// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=list;watch
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch
 
 // -----------------------------------------------------------------------------
 // EngineReconciler
@@ -109,6 +110,14 @@ func (r *EngineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				_, hasGWAPI := object.GetLabels()[gatewayNameLabel]
 				return hasGWAPI
 			}),
+		)).
+		Watches(&wafv1alpha1.Engine{}, handler.EnqueueRequestsFromMapFunc(r.findSiblingEngines), builder.WithPredicates(
+			predicate.Funcs{
+				CreateFunc:  func(event.CreateEvent) bool { return true },
+				DeleteFunc:  func(event.DeleteEvent) bool { return true },
+				UpdateFunc:  func(event.UpdateEvent) bool { return false },
+				GenericFunc: func(event.GenericEvent) bool { return false },
+			},
 		)).
 		Watches(&networkingv1.NetworkPolicy{}, handler.EnqueueRequestsFromMapFunc(r.findEnginesForNetworkPolicy), builder.WithPredicates(
 			networkPolicyPredicate(),
@@ -186,6 +195,13 @@ func (r *EngineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if degraded, err := r.isRuleSetDegraded(ctx, log, req, &engine); err != nil {
 		return ctrl.Result{}, err
 	} else if degraded {
+		return ctrl.Result{}, nil
+	}
+
+	logDebug(log, req, "Engine", "Validating target")
+	if ready, err := r.validateTarget(ctx, log, req, &engine); err != nil {
+		return ctrl.Result{}, err
+	} else if !ready {
 		return ctrl.Result{}, nil
 	}
 

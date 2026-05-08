@@ -45,6 +45,34 @@ func (r *EngineReconciler) findEnginesForGateway(ctx context.Context, gateway cl
 	})
 }
 
+// findSiblingEngines maps an Engine to all other Engines in the same namespace
+// that target the same Gateway. This ensures conflict detection is re-evaluated
+// when an Engine is created or deleted.
+func (r *EngineReconciler) findSiblingEngines(ctx context.Context, obj client.Object) []reconcile.Request {
+	log := logf.FromContext(ctx)
+
+	engine, ok := obj.(*wafv1alpha1.Engine)
+	if !ok {
+		return nil
+	}
+
+	if !hasGatewayTarget(engine) {
+		return nil
+	}
+
+	var engineList wafv1alpha1.EngineList
+	if err := r.List(ctx, &engineList, client.InNamespace(engine.GetNamespace())); err != nil {
+		log.Error(err, "Engine: Failed to list sibling Engines", "namespace", engine.GetNamespace())
+		return nil
+	}
+
+	return collectRequests(engineList.Items, func(e *wafv1alpha1.Engine) bool {
+		return e.Name != engine.Name &&
+			hasGatewayTarget(e) &&
+			e.Spec.Target.Name == engine.Spec.Target.Name
+	})
+}
+
 // findEnginesForPod maps a Pod to the Engines in the same namespace whose
 // workload selector matches the Pod's labels.
 func (r *EngineReconciler) findEnginesForPod(ctx context.Context, pod client.Object) []reconcile.Request {
